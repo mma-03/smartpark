@@ -1,0 +1,8 @@
+build/
+*.o
+*.a
+*.so
+node_modules/
+__pycache__/
+*.log
+captures/
