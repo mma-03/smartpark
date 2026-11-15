@@ -35,7 +35,7 @@
 - **Decision:** Parking spot rectangles are loaded from a textfile at startup. **Why:** If the camera moves, the coordinates can be remeasured and edited without changing code.
 - **Decision:** Take a reading every T = 150 ms, a spot changes state only after R = 5 readings in a row agree, so it updates in R x T = 750 ms. **Why:** The update must be under ~1 s so the gate doesn't let a car into a full lot, and longer than a short distrubance such as a hand or another object passing over a spot. N >= 2 so one bad frame can't incorrectly mark a spot. T >= 33 ms because the camera only produces a new frame every 33 ms.
 - **Decision:** Vision should record, for each spot, the time of its last state change and report it to callers. **Why:** Only vision knows when the car actually arrived: the time of the first reading in the R = 5 readings. A caller checking every ~1 s would see a chane up to ~1.75 s late (750 ms debounce + ~ 1s polling).
-- **Detection:** Keep `camera` separate from `occupancy`. **Why:** Detection can then be tested on a PC with PGM images instead of a camera.
+- **Decision:** Keep `camera` separate from `occupancy`. **Why:** Detection can then be tested on a PC with PGM images instead of a camera.
 
 ## Modules
 | Lives in | Module | Job |
