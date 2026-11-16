@@ -24,3 +24,7 @@ add_subdirectory(app)
 add_executable(rotary_test tests/rotary_test.c)
 target_link_libraries(rotary_test PRIVATE hal)
 
+# build joystick test program
+add_executable(joystick_test tests/joystick_test.c)
+target_link_libraries(joystick_test PRIVATE hal)
+
