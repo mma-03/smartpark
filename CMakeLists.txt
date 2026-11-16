@@ -20,3 +20,7 @@ add_link_options(-pthread)
 add_subdirectory(hal)  
 add_subdirectory(app)
 
+# build rotary encoder test program
+add_executable(rotary_test tests/rotary_test.c)
+target_link_libraries(rotary_test PRIVATE hal)
+
