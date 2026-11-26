@@ -1,21 +1,53 @@
+
+/*
+ENSC 351 - Design Project - SmartPark
+Author: Laxmi Unnithan
+HAL module: IR Sensor
+
+declares the functions used to read the entrance and exit IR sensors,
+debounce detection signals, and count vehicle detection events.
+*/
+
 #ifndef IR_SENSOR_H
 #define IR_SENSOR_H
 
-// Stores the state of one IR sensor (entrance or exit).
+struct gpiod_chip;
+struct gpiod_line_request;
+
 typedef struct {
-    int active_level;      // Raw GPIO value when an object is detected
-    int initialized;       // Have we read this sensor before?
-    int stable_present;    // Last confirmed state (0 or 1)
-    int pending_present;   // Possible next state
-    int pending_samples;   // Consecutive readings of that state
-    int events;            // Number of new detections
+    int activeLevel;
+    int lastReading;
+    int pendingReading;
+    int sameCount;
+    int started;
+    int eventCount;
+
+    struct gpiod_chip *chip;
+    struct gpiod_line_request *request;
+    unsigned int gpioLine;
 } IrSensor;
 
-void IrSensor_init(IrSensor *sensor, int active_level);
-// Supply a raw 0 or 1 from GPIO (or a test).
-// Returns 1 for a new detection, 0 otherwise, -1 for invalid input.
-int IrSensor_update(IrSensor *sensor, int raw_level);
+// initialize the sensor's detection logic
+void IrSensor_init(IrSensor *sensor, int activeLevel);
+
+// process a sensor reading; returns 1 for a new detection
+int IrSensor_update(IrSensor *sensor, int reading);
+
+// return 1 when an object is currently detected
 int IrSensor_isPresent(const IrSensor *sensor);
+
+// return the number of detection events
 int IrSensor_getCount(const IrSensor *sensor);
+
+// initialize the sensor's GPIO input
+int IrSensor_gpioInit(IrSensor *sensor,
+                      const char *chipPath,
+                      unsigned int line);
+
+// read the GPIO value (0 = LOW, 1 = HIGH)
+int IrSensor_gpioRead(IrSensor *sensor);
+
+// close the GPIO connection
+void IrSensor_gpioCleanup(IrSensor *sensor);
 
 #endif
