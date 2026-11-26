@@ -28,6 +28,10 @@ target_link_libraries(rotary_test PRIVATE hal)
 add_executable(joystick_test tests/joystick_test.c)
 target_link_libraries(joystick_test PRIVATE hal)
 
+# build servo test program
+add_executable(servo_test tests/servo_test.c)
+target_link_libraries(servo_test PRIVATE hal)
+
 # build local controls test program
 add_executable(local_controls_test tests/local_controls_test.c app/src/local_controls.c)
 target_include_directories(local_controls_test PRIVATE app/include)

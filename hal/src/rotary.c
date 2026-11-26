@@ -7,6 +7,7 @@ reads the rotary encoder connected to the BeagleY-AI using libgpiod.
 detects clockwise and counter-clockwise rotation and button presses.
 
 *reused code from Assignment 2
+*updated to use libgpiod 2.x
 
 */
 
@@ -19,7 +20,7 @@ detects clockwise and counter-clockwise rotation and button presses.
 #include <time.h>
 
 // gpio chip and line numbers used for encoder channels A and B
-#define GPIO_CHIP "gpiochip2"
+#define GPIO_CHIP "/dev/gpiochip2"
 #define GPIO_A 7
 #define GPIO_B 8
 
@@ -62,11 +63,14 @@ detects clockwise and counter-clockwise rotation and button presses.
 #define MS_PER_SECOND 1000LL
 #define NS_PER_MS 1000000LL
 
-// store the gpio connections for the encoder and optional push button
+// store the gpio chip and line requests for the rotary encoder
 static struct gpiod_chip *chip = NULL;
-static struct gpiod_line *lineA = NULL;
-static struct gpiod_line *lineB = NULL;
-static struct gpiod_line *lineSW = NULL;
+static struct gpiod_line_request *requestA = NULL;
+static struct gpiod_line_request *requestB = NULL;
+static struct gpiod_line_request *requestSW = NULL;
+
+// store the gpio line number used by the optional push button
+static unsigned int buttonOffset = 0;
 
 // keep track of the previous encoder state and valid transitions
 static int previousState = 0;
@@ -92,44 +96,103 @@ static long long getTimeMs(void){
          + now.tv_nsec / NS_PER_MS;
 }
 
+// configure and request a gpio line as an input with a pull-up resistor
+static struct gpiod_line_request *requestInput(
+        unsigned int offset, const char *consumer){
+
+    // create the gpio settings and configuration objects
+    struct gpiod_line_settings *settings =
+        gpiod_line_settings_new();
+
+    struct gpiod_line_config *config =
+        gpiod_line_config_new();
+
+    struct gpiod_request_config *requestConfig =
+        gpiod_request_config_new();
+
+    struct gpiod_line_request *request = NULL;
+
+    // check that all configuration objects were created
+    if (settings == NULL || config == NULL ||
+        requestConfig == NULL){
+        fprintf(stderr, "Rotary GPIO configuration failed\n");
+    }
+    else{
+
+        // configure the gpio line as an input with a pull-up resistor
+        // keep the default polarity so 0 is low and 1 is high
+        if (gpiod_line_settings_set_direction(settings,
+                GPIOD_LINE_DIRECTION_INPUT) < 0 ||
+            gpiod_line_settings_set_bias(settings,
+                GPIOD_LINE_BIAS_PULL_UP) < 0){
+            perror("Rotary GPIO settings");
+        }
+
+        // apply the settings to the requested gpio line
+        else if (gpiod_line_config_add_line_settings(
+                config, &offset, 1, settings) < 0){
+            perror("Rotary GPIO line configuration");
+        }
+        else{
+
+            // assign a name to identify the gpio line request
+            gpiod_request_config_set_consumer(
+                requestConfig, consumer);
+
+            // request access to the configured gpio line
+            request = gpiod_chip_request_lines(
+                chip, requestConfig, config);
+
+            if (request == NULL){
+                perror("Rotary GPIO request");
+            }
+        }
+    }
+
+    // free the configuration objects after requesting the gpio line
+    // the line request remains available for reading
+    if (settings != NULL){
+        gpiod_line_settings_free(settings);
+    }
+
+    if (config != NULL){
+        gpiod_line_config_free(config);
+    }
+
+    if (requestConfig != NULL){
+        gpiod_request_config_free(requestConfig);
+    }
+
+    return request;
+}
+
 void Rotary_init(int buttonLine){
 
     // open the gpio chip used by the rotary encoder
-    chip = gpiod_chip_open_by_name(GPIO_CHIP);
+    chip = gpiod_chip_open(GPIO_CHIP);
     if (chip == NULL){
         perror("Rotary GPIO chip");
         exit(1);
     }
 
-    // get the gpio lines connected to channels A and B
-    lineA = gpiod_chip_get_line(chip, GPIO_A);
-    lineB = gpiod_chip_get_line(chip, GPIO_B);
-
-    if (lineA == NULL || lineB == NULL){
-        perror("Rotary GPIO lines");
-        exit(1);
-    }
-
-    // configure both channels as inputs with internal pull-up resistors
+    // request channels A and B as inputs with pull-up resistors
     // the inputs are high when the encoder contacts are open
-    if (gpiod_line_request_input_flags(lineA, "rotary-A",
-            GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP) < 0){
-        perror("Rotary GPIO A");
-        exit(1);
-    }
+    requestA = requestInput(GPIO_A, "rotary-A");
+    requestB = requestInput(GPIO_B, "rotary-B");
 
-    if (gpiod_line_request_input_flags(lineB, "rotary-B",
-            GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP) < 0){
-        perror("Rotary GPIO B");
+    if (requestA == NULL || requestB == NULL){
+        fprintf(stderr, "Rotary GPIO lines failed\n");
+        Rotary_cleanup();
         exit(1);
     }
 
     // read the initial values of channels A and B
-    int a = gpiod_line_get_value(lineA);
-    int b = gpiod_line_get_value(lineB);
+    int a = gpiod_line_request_get_value(requestA, GPIO_A);
+    int b = gpiod_line_request_get_value(requestB, GPIO_B);
 
     if (a < 0 || b < 0){
         perror("Rotary initial read");
+        Rotary_cleanup();
         exit(1);
     }
 
@@ -145,21 +208,29 @@ void Rotary_init(int buttonLine){
         // make sure the button is not using an encoder channel line
         if (buttonLine == GPIO_A || buttonLine == GPIO_B){
             fprintf(stderr, "Rotary SW cannot share GPIO A or B\n");
+            Rotary_cleanup();
             exit(1);
         }
 
+        // store the button offset for future gpio reads
+        buttonOffset = (unsigned int)buttonLine;
+
         // request the button as an input with a pull-up resistor
-        lineSW = gpiod_chip_get_line(chip, buttonLine);
-        if (lineSW == NULL || gpiod_line_request_input_flags(lineSW,
-                "rotary-SW", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP) < 0){
-            perror("Rotary GPIO SW");
+        requestSW = requestInput(buttonOffset, "rotary-SW");
+
+        if (requestSW == NULL){
+            fprintf(stderr, "Rotary GPIO SW failed\n");
+            Rotary_cleanup();
             exit(1);
         }
 
         // store the starting button state for debounce detection
-        int button = gpiod_line_get_value(lineSW);
+        int button = gpiod_line_request_get_value(
+            requestSW, buttonOffset);
+
         if (button < 0){
             perror("Rotary button initial read");
+            Rotary_cleanup();
             exit(1);
         }
 
@@ -173,13 +244,13 @@ void Rotary_init(int buttonLine){
 int Rotary_getDirection(void){
 
     // return if the encoder has not been initialized
-    if (lineA == NULL || lineB == NULL){
+    if (requestA == NULL || requestB == NULL){
         return DIRECTION_NONE;
     }
 
     // read the current values of both encoder channels
-    int a = gpiod_line_get_value(lineA);
-    int b = gpiod_line_get_value(lineB);
+    int a = gpiod_line_request_get_value(requestA, GPIO_A);
+    int b = gpiod_line_request_get_value(requestB, GPIO_B);
 
     if (a < 0 || b < 0){
         return DIRECTION_NONE;
@@ -246,12 +317,14 @@ int Rotary_getDirection(void){
 int Rotary_getButtonEvent(void){
 
     // return no event if the optional button is not connected
-    if (lineSW == NULL){
+    if (requestSW == NULL){
         return ROTARY_BUTTON_NONE;
     }
 
     // read the button state and get the current time
-    int button = gpiod_line_get_value(lineSW);
+    int button = gpiod_line_request_get_value(
+        requestSW, buttonOffset);
+
     if (button < 0){
         return ROTARY_BUTTON_NONE;
     }
@@ -297,27 +370,29 @@ int Rotary_getButtonEvent(void){
 
 void Rotary_cleanup(void){
 
-    // release the optional push button gpio line
-    if (lineSW != NULL){
-        gpiod_line_release(lineSW);
+    // release the optional push button gpio request
+    if (requestSW != NULL){
+        gpiod_line_request_release(requestSW);
     }
 
-    // release the gpio lines used by the rotary encoder
-    if (lineA != NULL){
-        gpiod_line_release(lineA);
-    }
-    if (lineB != NULL){
-        gpiod_line_release(lineB);
+    // release the gpio requests used by the rotary encoder
+    if (requestA != NULL){
+        gpiod_line_request_release(requestA);
     }
 
-    // close the gpio chip after releasing its lines
+    if (requestB != NULL){
+        gpiod_line_request_release(requestB);
+    }
+
+    // close the gpio chip after releasing its requests
     if (chip != NULL){
         gpiod_chip_close(chip);
     }
 
     // clear stored pointers after releasing resources
-    lineSW = NULL;
-    lineA = NULL;
-    lineB = NULL;
+    requestSW = NULL;
+    requestA = NULL;
+    requestB = NULL;
     chip = NULL;
+    buttonOffset = 0;
 }
