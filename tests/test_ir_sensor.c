@@ -18,7 +18,7 @@ events and final detection counts.
 
 // GPIO connections for entrance and exit sensors
 #define ENTRANCE_CHIP "/dev/gpiochip2"
-#define ENTRANCE_LINE 8
+#define ENTRANCE_LINE 14
 
 #define EXIT_CHIP "/dev/gpiochip1"
 #define EXIT_LINE 33
